@@ -463,8 +463,9 @@ func (d *Dnsfilter) setCacheResult(cache cache.Cache, host string, res Result) {
 		log.Error("gob.Encode(): %s", err)
 		return
 	}
-	_ = cache.Set([]byte(host), buf.Bytes())
-	log.Debug("Stored in cache %p: %s", cache, host)
+	val := buf.Bytes()
+	_ = cache.Set([]byte(host), val)
+	log.Debug("Stored in cache %p: %s (%d bytes)", cache, host, len(val))
 }
 
 func getCachedResult(cache cache.Cache, host string) (Result, bool) {
