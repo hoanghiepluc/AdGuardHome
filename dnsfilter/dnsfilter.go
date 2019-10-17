@@ -1,12 +1,12 @@
 package dnsfilter
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/gob"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -32,7 +32,8 @@ import (
 const defaultHTTPTimeout = 5 * time.Minute
 const defaultHTTPMaxIdleConnections = 100
 
-const defaultSafebrowsingServer = "sb.adtidy.org"
+// const defaultSafebrowsingServer = "sb.adtidy.org"
+const defaultSafebrowsingServer = "127.0.0.1:5355"
 const defaultSafebrowsingURL = "%s://%s/safebrowsing-lookup-hash.html?prefixes=%s"
 const defaultParentalServer = "pctrl.adguard.com"
 const defaultParentalURL = "%s://%s/check-parental-control-hash?prefixes=%s&sensitivity=%d"
@@ -512,14 +513,11 @@ func hostnameToHashParam(host string, addslash bool) (string, map[string]bool) {
 			// we've reached the TLD, don't hash it
 			break
 		}
-		tohash := []byte(curhost)
-		if addslash {
-			tohash = append(tohash, '/')
-		}
-		sum := sha256.Sum256(tohash)
-		hexhash := fmt.Sprintf("%X", sum)
-		hashes[hexhash] = true
-		hashparam.WriteString(fmt.Sprintf("%02X%02X%02X%02X/", sum[0], sum[1], sum[2], sum[3]))
+
+		sum := sha256.Sum256([]byte(curhost))
+		hashes[hex.EncodeToString(sum[:])] = true
+		hashparam.WriteString(fmt.Sprintf("%s.", hex.EncodeToString(sum[0:4])))
+
 		pos := strings.IndexByte(curhost, byte('.'))
 		if pos < 0 {
 			break
@@ -581,58 +579,56 @@ func (d *Dnsfilter) checkSafeSearch(host string) (Result, error) {
 func (d *Dnsfilter) checkSafeBrowsing(host string) (Result, error) {
 	if log.GetLevel() >= log.DEBUG {
 		timer := log.StartTimer()
-		defer timer.LogElapsed("SafeBrowsing HTTP lookup for %s", host)
-	}
-
-	format := func(hashparam string) string {
-		schema := "https"
-		if d.UsePlainHTTP {
-			schema = "http"
-		}
-		url := fmt.Sprintf(defaultSafebrowsingURL, schema, d.safeBrowsingServer, hashparam)
-		return url
-	}
-	handleBody := func(body []byte, hashes map[string]bool) (Result, error) {
-		result := Result{}
-		scanner := bufio.NewScanner(strings.NewReader(string(body)))
-		for scanner.Scan() {
-			line := scanner.Text()
-			splitted := strings.Split(line, ":")
-			if len(splitted) < 3 {
-				continue
-			}
-			hash := splitted[2]
-			if _, ok := hashes[hash]; ok {
-				// it's in the hash
-				result.IsFiltered = true
-				result.Reason = FilteredSafeBrowsing
-				result.Rule = splitted[0]
-				break
-			}
-		}
-
-		if err := scanner.Err(); err != nil {
-			// error, don't save cache
-			return Result{}, err
-		}
-		return result, nil
+		defer timer.LogElapsed("SafeBrowsing lookup for %s", host)
 	}
 
 	// check cache
 	cachedValue, isFound := getCachedResult(gctx.safebrowsingCache, host)
 	if isFound {
 		atomic.AddUint64(&gctx.stats.Safebrowsing.CacheHits, 1)
-		log.Tracef("%s: found in the lookup cache %p", host, gctx.safebrowsingCache)
+		log.Tracef("SafeBrowsing: %s: found in the lookup cache %p", host, gctx.safebrowsingCache)
 		return cachedValue, nil
 	}
 
-	result, err := d.lookupCommon(host, &gctx.stats.Safebrowsing, true, format, handleBody)
+	result := Result{}
+	hashparam, hashes := hostnameToHashParam(host, true)
 
-	if err == nil {
-		d.setCacheResult(gctx.safebrowsingCache, host, result)
+	log.Tracef("SafeBrowsing: checking %s: %s", host, hashparam)
+
+	u, err := upstream.AddressToUpstream(d.safeBrowsingServer, upstream.Options{})
+	if err != nil {
+		return result, err
+	}
+	req := dns.Msg{}
+	req.SetQuestion(hashparam, dns.TypeTXT)
+	resp, err := u.Exchange(&req)
+	if err != nil {
+		return result, err
 	}
 
-	return result, err
+	for _, a := range resp.Answer {
+		txt, ok := a.(*dns.TXT)
+		if !ok {
+			continue
+		}
+		log.Tracef("SafeBrowsing: hashes for %s: %v", host, txt.Txt)
+		for _, t := range txt.Txt {
+			_, ok := hashes[t]
+			if ok {
+				log.Tracef("SafeBrowsing: matched %s by %s", host, t)
+				result.IsFiltered = true
+				result.Reason = FilteredSafeBrowsing
+				result.Rule = "adguard-malware-shavar"
+				break
+			}
+		}
+		if result.IsFiltered {
+			break
+		}
+	}
+
+	d.setCacheResult(gctx.safebrowsingCache, host, result)
+	return result, nil
 }
 
 func (d *Dnsfilter) checkParental(host string) (Result, error) {
