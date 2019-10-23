@@ -9,14 +9,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/AdguardTeam/dnsproxy/upstream"
 	"github.com/AdguardTeam/golibs/cache"
 	"github.com/AdguardTeam/golibs/log"
 	"github.com/AdguardTeam/urlfilter"
 	"github.com/miekg/dns"
 )
-
-const defaultSafebrowsingServer = "127.0.0.1:5355"
-const defaultParentalServer = "127.0.0.1:5355"
 
 // ServiceEntry - blocked service array element
 type ServiceEntry struct {
@@ -87,8 +85,10 @@ type Dnsfilter struct {
 	filteringEngine *urlfilter.DNSEngine
 	engineLock      sync.RWMutex
 
-	parentalServer     string // access via methods
-	safeBrowsingServer string // access via methods
+	parentalServer       string // access via methods
+	safeBrowsingServer   string // access via methods
+	parentalUpstream     upstream.Upstream
+	safeBrowsingUpstream upstream.Upstream
 
 	Config   // for direct access by library users, even a = assignment
 	confLock sync.RWMutex
@@ -559,8 +559,13 @@ func New(c *Config, filters map[int]string) *Dnsfilter {
 	}
 
 	d := new(Dnsfilter)
-	d.safeBrowsingServer = defaultSafebrowsingServer
-	d.parentalServer = defaultParentalServer
+
+	err := d.initSecurityServices()
+	if err != nil {
+		log.Error("dnsfilter: initialize services: %s", err)
+		return nil
+	}
+
 	if c != nil {
 		d.Config = *c
 	}

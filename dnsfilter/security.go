@@ -27,6 +27,26 @@ import (
 )
 
 const dnsTimeout = 3 * time.Second
+const defaultSafebrowsingServer = "127.0.0.1:5355"
+const defaultParentalServer = "127.0.0.1:5355"
+
+func (d *Dnsfilter) initSecurityServices() error {
+	var err error
+	d.safeBrowsingServer = defaultSafebrowsingServer
+	d.parentalServer = defaultParentalServer
+
+	d.parentalUpstream, err = upstream.AddressToUpstream(d.parentalServer, upstream.Options{Timeout: dnsTimeout})
+	if err != nil {
+		return err
+	}
+
+	d.safeBrowsingUpstream, err = upstream.AddressToUpstream(d.safeBrowsingServer, upstream.Options{Timeout: dnsTimeout})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
 
 /*
 expire byte[4]
@@ -187,13 +207,9 @@ func (d *Dnsfilter) checkSafeBrowsing(host string) (Result, error) {
 
 	log.Tracef("SafeBrowsing: checking %s: %s", host, question)
 
-	u, err := upstream.AddressToUpstream(d.safeBrowsingServer, upstream.Options{Timeout: dnsTimeout})
-	if err != nil {
-		return result, err
-	}
 	req := dns.Msg{}
 	req.SetQuestion(question, dns.TypeTXT)
-	resp, err := u.Exchange(&req)
+	resp, err := d.safeBrowsingUpstream.Exchange(&req)
 	if err != nil {
 		return result, err
 	}
@@ -244,13 +260,9 @@ func (d *Dnsfilter) checkParental(host string) (Result, error) {
 
 	log.Tracef("Parental: checking %s: %s", host, question)
 
-	u, err := upstream.AddressToUpstream(d.safeBrowsingServer, upstream.Options{Timeout: dnsTimeout})
-	if err != nil {
-		return result, err
-	}
 	req := dns.Msg{}
 	req.SetQuestion(question, dns.TypeTXT)
-	resp, err := u.Exchange(&req)
+	resp, err := d.parentalUpstream.Exchange(&req)
 	if err != nil {
 		return result, err
 	}
