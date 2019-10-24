@@ -46,3 +46,27 @@ func TestQueryLog(t *testing.T) {
 	mq := m["question"].(map[string]interface{})
 	assert.True(t, mq["host"].(string) == "example.org")
 }
+
+func TestJSON(t *testing.T) {
+	s := `
+	{"keystr":"val","obj":{"keybool":true,"keyint":123456}}
+	`
+	k, v, tt := readJSON(&s)
+	assert.Equal(t, int32(1), tt)
+	assert.Equal(t, "keystr", k)
+	assert.Equal(t, "val", v)
+
+	k, v, tt = readJSON(&s)
+	assert.Equal(t, int32(0), tt)
+	assert.Equal(t, "obj", k)
+
+	k, v, tt = readJSON(&s)
+	assert.Equal(t, int32(3), tt)
+	assert.Equal(t, "keybool", k)
+	assert.Equal(t, "true", v)
+
+	k, v, tt = readJSON(&s)
+	assert.Equal(t, int32(2), tt)
+	assert.Equal(t, "keyint", k)
+	assert.Equal(t, "123456", v)
+}

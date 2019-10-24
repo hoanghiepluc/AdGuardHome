@@ -1012,17 +1012,20 @@ Response:
 When a new DNS request is received and processed, we store information about this event in "query log".  It is a file on disk in JSON format:
 
 	{
-	"Question":"...","
-	Answer":"...",
+	"IP":"127.0.0.1", // client IP
+	"T":"...", // response time
+	"QH":"...", // target host name without the last dot
+	"QT":"...", // question type
+	"QC":"...", // question class
+	"Answer":"...",
 	"Result":{
 		"IsFiltered":true,
 		"Reason":3,
 		"Rule":"...",
 		"FilterID":1
 		},
-	"Time":"...",
 	"Elapsed":12345,
-	"IP":"127.0.0.1"
+	"Upstream":"...",
 	}
 
 
